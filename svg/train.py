@@ -20,7 +20,8 @@ from setproctitle import setproctitle
 setproctitle("svg")
 
 import hydra
-import hydra_plugins
+
+# import hydra_plugins
 import wandb
 
 from svg import sweeper
@@ -57,12 +58,12 @@ class Workspace(object):
 
         utils.set_seed_everywhere(cfg.seed)
         self.device = torch.device(cfg.device)
-        self.env = utils.make_norm_env(cfg)
+        # self.env = utils.make_norm_env(cfg)
+        self.env = hydra.utils.instantiate(cfg.env)
         self.episode = 0
         self.episode_step = 0
         self.episode_reward = 0
         self.done = False
-        self.score_keys = []
         self.score_keys = cfg.score_keys
 
         cfg.obs_dim = int(self.env.observation_space.shape[0])
@@ -200,7 +201,7 @@ class Workspace(object):
                 with utils.eval_mode(self.agent):
                     if self.cfg.normalize_obs:
                         mu, sigma = self.replay_buffer.get_obs_stats()
-                        obs_norm = (obs - mu) / sigma
+                        obs_norm = (obs.detach().numpy() - mu) / sigma
                         action = self.agent.act(obs_norm, sample=True)
                     else:
                         action = self.agent.act(obs, sample=True)
@@ -209,13 +210,14 @@ class Workspace(object):
             if self.step >= self.cfg.num_seed_steps - 1:
                 self.agent.update(self.replay_buffer, self.logger, self.step)
 
+            action = torch.tensor(action, device=self.device)
             next_obs, reward, self.done, self.info = self.env.step(action)
 
             # allow infinite bootstrap
             done_float = float(self.done)
             done_no_max = (
                 done_float
-                if self.episode_step + 1 < self.env._max_episode_steps
+                if self.episode_step + 1 < self.cfg.max_episode_steps
                 else 0.0
             )
             self.episode_reward += reward
