@@ -31,15 +31,15 @@ from svg import agent, utils, temp, dx, actor, critic
 from svg.logger import Logger
 from svg.replay_buffer import ReplayBuffer
 
-try:
-    if os.isatty(sys.stdout.fileno()):
-        from IPython.core import ultratb
+# try:
+#     if os.isatty(sys.stdout.fileno()):
+#         from IPython.core import ultratb
 
-        sys.excepthook = ultratb.FormattedTB(
-            mode="Verbose", color_scheme="Linux", call_pdb=1
-        )
-except:
-    pass
+#         sys.excepthook = ultratb.FormattedTB(
+#             mode="Verbose", color_scheme="Linux", call_pdb=1
+#         )
+# except:
+#     pass
 
 
 class Workspace(object):
