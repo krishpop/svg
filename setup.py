@@ -10,6 +10,6 @@ setup(
     url="https://github.com/TODO",
     packages=find_packages(),
     install_requires=[
-        'numpy>=1<2',
+        'numpy==1.20',
     ]
 )
