@@ -1,0 +1,30 @@
+# @package _global_
+env_name: claw_grasp
+
+num_train_steps: 1e6
+eval_freq: 25000
+
+agent:
+  horizon: 0
+  warmup_steps: 10000
+
+replay_buffer_capacity: 1e6
+normalize_obs: true
+delete_replay_at_end: false
+
+learn_temp:
+  init_targ_entr: -10
+  final_targ_entr: -10
+  entr_decay_factor: 1.0
+
+# ClawWarpEnv params
+diff_env:
+    name: ClawWarpEnv-svg
+    stochastic_env: False
+    episode_length: 250
+    goal_type: 2 # 0: position, 1: orientation, 2: both, 3: position trajectory, 4: orientation trajectory
+    action_type: 0 # 0: position, 1: torque
+    object_type: 8
+    device: "cuda"
+
+score_keys: ["control_pen", "ftip_err", "q_err", "pos_err", "force_err"]
