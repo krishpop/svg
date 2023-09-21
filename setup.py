@@ -9,7 +9,5 @@ setup(
     platforms=["any"],
     url="https://github.com/TODO",
     packages=find_packages(),
-    # install_requires=[
-    #     'numpy>=1<2',
-    # ]
+    install_requires=["numpy>=1.16.0", "sortedcontainers", "termcolor"],
 )

@@ -144,7 +144,9 @@ class SACSVGAgent(Agent):
 
         self.train()
         self.last_step = 0
-        self.rolling_dx_loss = None
+        self.rolling_dx_loss = torch.inf
+        self.policy_loss = torch.inf
+        self.rolling_dx_loss = torch.inf
 
     def __setstate__(self, d):
         self.__dict__ = d
@@ -170,8 +172,8 @@ class SACSVGAgent(Agent):
 
     def act(self, obs, sample=False):
         obs = torch.FloatTensor(obs).to(self.device)
-        obs = obs.unsqueeze(dim=0)
-
+        if obs.ndim == 1:
+            obs = obs.unsqueeze(dim=0)
         if not sample:
             action, _, _ = self.actor(obs, compute_pi=False, compute_log_pi=False)
         else:
@@ -179,8 +181,8 @@ class SACSVGAgent(Agent):
                 _, action, _ = self.actor(obs, compute_log_pi=False)
 
         action = action.clamp(*self.action_range)
-        assert action.ndim in [2, 3] and action.shape[0] == 1
-        return utils.to_np(action[0])
+        assert action.ndim in [2, 3]  # and action.shape[0] == 1
+        return utils.to_np(action)
 
     def expand_Q(self, xs, critic, sample=True, discount=False):
         assert xs.dim() == 2
@@ -247,8 +249,9 @@ class SACSVGAgent(Agent):
             assert total_log_p_us.size() == rewards.size()
             actor_loss = -(rewards / self.horizon).mean()
 
-        logger.log("train_actor/loss", actor_loss, step)
-        logger.log("train_actor/entropy", -first_log_p.mean(), step)
+        logger.log("policy_loss", actor_loss, step)
+        logger.log("entropy", -first_log_p.mean(), step)
+        self.policy_loss = actor_loss.item()
 
         self.actor_opt.zero_grad()
         actor_loss.backward()
@@ -257,7 +260,7 @@ class SACSVGAgent(Agent):
         self.actor.log(logger, step)
         self.temp.update(first_log_p, logger, step)
 
-        logger.log("train_alpha/value", self.temp.alpha, step)
+        logger.log("alpha", self.temp.alpha, step)
 
     def update_critic(self, xs, xps, us, rs, not_done, logger, step):
         assert xs.ndimension() == 2
@@ -278,7 +281,7 @@ class SACSVGAgent(Agent):
                 target_Q = (
                     torch.min(target_Q1, target_Q2) - self.temp.alpha.detach() * log_pi
                 )
-                assert target_Q.size() == rs.size()
+                assert target_Q.size() == rs.size(), (target_Q.size(), rs.size())
                 assert target_Q.ndimension() == 1
                 target_Q = rs + not_done * self.discount * target_Q
                 target_Q = target_Q.detach()
@@ -295,13 +298,14 @@ class SACSVGAgent(Agent):
         assert current_Q2.size() == target_Q.size()
         Q_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(current_Q2, target_Q)
 
-        logger.log("train_critic/Q_loss", Q_loss, step)
+        logger.log("value_loss", Q_loss, step)
+        self.critic_loss = Q_loss.item()
         current_Q = torch.min(current_Q1, current_Q2)
-        logger.log("train_critic/value", current_Q.mean(), step)
+        logger.log("value_mean", current_Q.mean(), step)
 
         self.critic_opt.zero_grad()
         Q_loss.backward()
-        logger.log("train_critic/Q_loss", Q_loss, step)
+        # logger.log("train_critic/Q_loss", Q_loss, step)
         self.critic_opt.step()
 
         self.critic.log(logger, step)
@@ -386,13 +390,14 @@ class SACSVGAgent(Agent):
         q2_loss = (not_dones[:-1, 0] * (q2 - critic_targets).pow(2)).mean()
         Q_loss = q1_loss + q2_loss
 
-        logger.log("train_critic/Q_loss", Q_loss, step)
+        logger.log("value_loss", Q_loss, step)
+        self.value_loss = Q_loss.item()
         current_Q = torch.min(q1, q2)
-        logger.log("train_critic/value", current_Q.mean(), step)
+        logger.log("value_mean", current_Q.mean(), step)
 
         self.critic_opt.zero_grad()
         Q_loss.backward()
-        logger.log("train_critic/Q_loss", Q_loss, step)
+        # logger.log("train_critic/Q_loss", Q_loss, step)
         self.critic_opt.step()
 
         self.critic.log(logger, step)
@@ -413,14 +418,7 @@ class SACSVGAgent(Agent):
                 )
                 assert obses.ndimension() == 3
                 dx_loss = self.dx.update_step(obses, actions, rewards, logger, step)
-                if self.actor_dx_threshold is not None:
-                    if self.rolling_dx_loss is None:
-                        self.rolling_dx_loss = dx_loss
-                    else:
-                        factor = 0.9
-                        self.rolling_dx_loss = (
-                            factor * self.rolling_dx_loss + (1.0 - factor) * dx_loss
-                        )
+                self.rolling_dx_loss = dx_loss  # not rolling anymore!
 
         n_updates = 1 if step < self.warmup_steps else self.model_free_update_repeat
         for i in range(n_updates):
@@ -469,7 +467,7 @@ class SACSVGAgent(Agent):
         reward_loss.backward()
         self.rew_opt.step()
 
-        logger.log("train_model/reward_loss", reward_loss, step)
+        logger.log("reward_loss", reward_loss, step)
 
     def update_done_step(self, obs, action, not_done, logger, step):
         assert obs.dim() == 2
@@ -492,4 +490,4 @@ class SACSVGAgent(Agent):
         done_loss.backward()
         self.done_opt.step()
 
-        logger.log("train_model/done_loss", done_loss, step)
+        logger.log("done_loss", done_loss, step)

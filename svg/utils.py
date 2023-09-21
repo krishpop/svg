@@ -690,6 +690,7 @@ def accum_prod(x):
 
 import numpy as np
 
+
 # https://pswww.slac.stanford.edu/svn-readonly/psdmrepo/RunSummary/trunk/src/welford.py
 class Welford(object):
     """Knuth implementation of Welford algorithm."""
@@ -710,21 +711,23 @@ class Welford(object):
         if x is None:
             return
 
-        x = np.array(x)
-        self.n += 1.0
-        if not self._init:
-            self._init = True
-            self._K = x
-            self._min = x
-            self._max = x
-            self.shape = x.shape
-        else:
-            self._min = np.minimum(self._min, x)
-            self._max = np.maximum(self._max, x)
+        # x = np.array(x)
+        x = maybe_numpy(x)
+        for n in range(x.shape[0]):
+            self.n += 1.0
+            if not self._init:
+                self._init = True
+                self._K = x[n]
+                self._min = x[n]
+                self._max = x[n]
+                self.shape = x.shape
+            else:
+                self._min = np.minimum(self._min, x[n])
+                self._max = np.maximum(self._max, x[n])
 
-        self._Ex += (x - self._K) / self.n
-        self._Ex2 += (x - self._K) * (x - self._Ex)
-        self._K = self._Ex
+            self._Ex += (x[n] - self._K) / self.n
+            self._Ex2 += (x[n] - self._K) * (x[n] - self._Ex)
+            self._K = self._Ex
 
     def __call__(self, x):
         self.add_data(x)
@@ -788,3 +791,10 @@ class Welford(object):
 
     def __repr__(self):
         return "< Welford: {:} >".format(str(self))
+
+
+def maybe_numpy(x):
+    with torch.no_grad():
+        if type(x) == torch.Tensor:
+            x = x.detach().cpu().numpy()
+    return x

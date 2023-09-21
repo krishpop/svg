@@ -40,6 +40,38 @@ from svg.replay_buffer import ReplayBuffer
 #         )
 # except:
 #     pass
+import torch
+import torch.nn as nn
+import numpy as np
+
+
+class AverageMeter(nn.Module):
+    def __init__(self, in_shape, max_size):
+        super(AverageMeter, self).__init__()
+        self.max_size = max_size
+        self.current_size = 0
+        self.register_buffer("mean", torch.zeros(in_shape, dtype=torch.float32))
+
+    def update(self, values):
+        size = values.size()[0]
+        if size == 0:
+            return
+        new_mean = torch.mean(values.float(), dim=0)
+        size = np.clip(size, 0, self.max_size)
+        old_size = min(self.max_size - size, self.current_size)
+        size_sum = old_size + size
+        self.current_size = size_sum
+        self.mean = (self.mean * old_size + new_mean * size) / size_sum
+
+    def clear(self):
+        self.current_size = 0
+        self.mean.fill_(0)
+
+    def __len__(self):
+        return self.current_size
+
+    def get_mean(self):
+        return self.mean.squeeze(0).cpu().numpy()
 
 
 class Workspace(object):
@@ -63,7 +95,6 @@ class Workspace(object):
         self.episode = 0
         self.episode_step = 0
         self.episode_reward = 0
-        self.done = False
         self.score_keys = cfg.score_keys
 
         cfg.obs_dim = int(self.env.observation_space.shape[0])
@@ -78,6 +109,7 @@ class Workspace(object):
             cfg.replay_buffer_capacity = int(eval(cfg.replay_buffer_capacity))
 
         self.replay_buffer = ReplayBuffer(
+            self.env.num_envs,
             self.env.observation_space.shape,
             self.env.action_space.shape,
             int(cfg.replay_buffer_capacity),
@@ -89,7 +121,6 @@ class Workspace(object):
         self.video_recorder = VideoRecorder(self.work_dir if cfg.save_video else None)
 
         self.step = 0
-        self.info = {}
         self.steps_since_eval = 0
         self.steps_since_save = 0
         self.best_eval_rew = None
@@ -131,15 +162,16 @@ class Workspace(object):
 
     # @profile
     def run(self):
-        assert not self.done
         assert self.episode_reward == 0.0
         assert self.episode_step == 0
         self.agent.reset()
         obs = self.env.reset()
+        done = False
 
         start_time = time.time()
         while self.step < self.cfg.num_train_steps:
-            if self.done:
+            if done:
+                # log training metric
                 if self.step > 0:
                     self.logger.log(
                         "train/episode_reward", self.episode_reward, self.step
@@ -148,15 +180,15 @@ class Workspace(object):
                     self.logger.log("train/duration", time_elapsed, self.step)
                     self.logger.log("train/episode", self.episode, self.step)
                     for key in self.score_keys:
-                        if key in self.info:
+                        if key in info:
                             self.logger.log(
-                                f"train/scores/{key}/step", self.info[key], self.step
+                                f"train/scores/{key}/step", info[key], self.step
                             )
                             self.logger.log(
-                                f"train/scores/{key}/iter", self.info[key], self.step
+                                f"train/scores/{key}/iter", info[key], self.step
                             )
                             self.logger.log(
-                                f"train/scores/{key}/time", self.info[key], time_elapsed
+                                f"train/scores/{key}/time", info[key], time_elapsed
                             )
 
                     start_time = time.time()
@@ -164,6 +196,7 @@ class Workspace(object):
                         self.step, save=(self.step > self.cfg.num_seed_steps)
                     )
 
+                # eval if necessary
                 if self.steps_since_eval >= self.cfg.eval_freq:
                     self.logger.log("eval/episode", self.episode, self.step)
                     eval_rew = self.evaluate()
@@ -189,19 +222,24 @@ class Workspace(object):
                     self.env.set_seed(self.episode % self.cfg.num_initial_states)
                 obs = self.env.reset()
                 self.agent.reset()
-                self.done = False
+                done = False
                 self.episode_reward = 0
                 self.episode_step = 0
                 self.episode += 1
 
             # sample action for data collection
             if self.step < self.cfg.num_seed_steps:
-                action = self.env.action_space.sample()
+                # TODO make this scalable for single and vectorized environments
+                action = []
+                for _ in range(self.env.num_envs):
+                    action.append(self.env.action_space.sample())
+                action = np.stack(action)
             else:
                 with utils.eval_mode(self.agent):
                     if self.cfg.normalize_obs:
                         mu, sigma = self.replay_buffer.get_obs_stats()
-                        obs_norm = (obs.detach().numpy() - mu) / sigma
+                        obs = utils.maybe_numpy(obs)
+                        obs_norm = (obs - mu) / sigma
                         action = self.agent.act(obs_norm, sample=True)
                     else:
                         action = self.agent.act(obs, sample=True)
@@ -211,10 +249,10 @@ class Workspace(object):
                 self.agent.update(self.replay_buffer, self.logger, self.step)
 
             action = torch.tensor(action, device=self.device)
-            next_obs, reward, self.done, self.info = self.env.step(action)
+            next_obs, reward, done, info = self.env.step(action)
 
             # allow infinite bootstrap
-            done_float = float(self.done)
+            done_float = done.float()
             done_no_max = (
                 done_float
                 if self.episode_step + 1 < self.cfg.max_episode_steps
@@ -235,6 +273,96 @@ class Workspace(object):
         if self.steps_since_eval > 1:
             self.logger.log("eval/episode", self.episode, self.step)
             self.evaluate()
+
+        if self.cfg.delete_replay_at_end:
+            shutil.rmtree(self.replay_dir)
+
+    # @profile
+    def run_epochs(self):
+        # assert not self.done
+        assert self.episode_reward == 0.0
+        assert self.episode_step == 0
+        self.agent.reset()
+        obs = self.env.reset()
+
+        episode_length_meter = AverageMeter(1, 100).to(self.device)
+        episode_reward_meter = AverageMeter(1, 100).to(self.device)
+
+        self.episode_reward = torch.zeros((self.env.num_envs,))
+        self.episode_step = torch.zeros((self.env.num_envs,))
+
+        epoch = 0
+        while self.step < self.cfg.num_train_steps:
+            # do a steps_num long rollout
+            start_time = time.time()
+            for _ in range(self.cfg.steps_num):
+                # sample action for data collection
+                if self.step < self.cfg.num_seed_steps:
+                    action = []
+                    for _ in range(self.env.num_envs):
+                        action.append(self.env.action_space.sample())
+                    action = np.stack(action)
+                else:
+                    with utils.eval_mode(self.agent):
+                        if self.cfg.normalize_obs:
+                            mu, sigma = self.replay_buffer.get_obs_stats()
+                            obs = utils.maybe_numpy(obs)
+                            obs_norm = (obs - mu) / sigma
+                            action = self.agent.act(obs_norm, sample=True)
+                        else:
+                            action = self.agent.act(obs, sample=True)
+
+                action = torch.tensor(action, device=self.device)
+                # print(self.step)
+                # print(action.shape)
+                # print(action)
+                next_obs, reward, done, info = self.env.step(action)
+
+                # allow infinite bootstrap
+                done_float = done.float()
+                done_no_max = utils.maybe_numpy(info["termination"])
+                self.episode_reward += utils.maybe_numpy(reward)
+
+                self.replay_buffer.add(
+                    obs, action, reward, next_obs, done_float, done_no_max
+                )
+
+                obs = next_obs
+                self.episode_step += 1
+                self.step += self.env.num_envs
+                epoch += 1
+
+                # log all done environments
+                dones = done.nonzero(as_tuple=False).squeeze(-1)
+                episode_length_meter.update(self.episode_step[dones])
+                self.episode_step[dones] = 0.0
+                episode_reward_meter.update(self.episode_reward[dones])
+                self.episode_reward[dones] = 0.0
+
+            # update at the end of the rollout
+            # TODO need to scale up num updates to account for num_steps
+            # if self.step > self.cfg.num_seed_steps:
+            self.agent.update(self.replay_buffer, self.logger, self.step)
+
+            end_time = time.time()
+            fps = self.cfg.steps_num * self.env.num_envs / (end_time - start_time)
+
+            r = episode_reward_meter.get_mean()
+            l = episode_length_meter.get_mean()
+            print(
+                f"{self.step}/{self.cfg.num_train_steps}, ep_reward: {r:.2f}, ep_len: {l:.2f}, fps: {fps:.2f}, dx_loss: {self.agent.rolling_dx_loss:.2f}, policy_loss: {self.agent.policy_loss:.2f}, critic_loss: {self.agent.critic_loss:.2f}"
+            )
+
+            # log metrics for envs that are done
+            self.logger.log("reward", r, self.step)
+            self.logger.log("episode_lengths", l, self.step)
+            self.logger.log("fps", fps, self.step)
+            self.logger.log("dx_loss", self.agent.rolling_dx_loss, self.step)
+
+            # save checkpoints
+            if self.step > 0 and epoch % self.cfg.save_freq == 0:
+                tag = str(self.step).zfill(self.cfg.save_zfill)
+                self.save(tag=tag)
 
         if self.cfg.delete_replay_at_end:
             shutil.rmtree(self.replay_dir)
@@ -270,7 +398,7 @@ class Workspace(object):
             self.env._max_episode_steps = self.cfg.max_episode_steps
         self.episode_step = 0
         self.episode_reward = 0
-        self.done = False
+        done = False
 
         if os.path.exists(self.replay_dir):
             self.replay_buffer.load_data(self.replay_dir)
