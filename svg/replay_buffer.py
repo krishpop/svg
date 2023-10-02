@@ -110,15 +110,9 @@ class ReplayBuffer(object):
         )
 
         if self.normalize_obs:
-            self.welford.add_data(obs.flatten())
+            self.welford.add_data(obs)
 
-        # if self.full and not self.not_dones[self.idx]:
-        # print("done envs", done.nonzero()[0])
-        # print(self.done_idxs[0])
         if np.any(done):
-            # print(done)
-            # print(done.shape)
-            # print(done.nonzero())
             for i in done.nonzero()[0]:
                 self.done_idxs[i.item()].add(self.idx)
         elif self.full:
@@ -139,9 +133,9 @@ class ReplayBuffer(object):
         self.full = self.full or self.idx == 0
 
     def sample(self, batch_size):
-        batch_size = batch_size // self.num_envs
+        m_batch_size = batch_size // self.num_envs
         idxs = np.random.randint(
-            0, self.capacity if self.full else self.idx, size=batch_size
+            0, self.capacity if self.full else self.idx, size=m_batch_size
         )
 
         obses = self.obses[idxs].reshape((-1, *self.obs_shape))
@@ -164,6 +158,12 @@ class ReplayBuffer(object):
         )
         not_dones = torch.as_tensor(not_dones, device=self.device)
         not_dones_no_max = torch.as_tensor(not_dones_no_max, device=self.device)
+
+        assert obses.shape == (batch_size, *self.obs_shape), obses.shape
+        assert actions.shape == (batch_size, *self.action_shape), actions.shape
+        assert rewards.shape == (batch_size, 1), rewards.shape
+        # assert not_dones == (batch_size, 1), not_dones.shape
+        # assert not_dones_no_max == (batch_size, 1), not_dones_no_max.shape
 
         return obses, actions, rewards, next_obses, not_dones, not_dones_no_max
 

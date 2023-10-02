@@ -2,8 +2,10 @@
 
 import abc
 
+import numpy as np
 import torch
 import torch.nn.functional as F
+from torch.nn.utils.clip_grad import clip_grad_norm_
 
 import hydra
 
@@ -251,16 +253,18 @@ class SACSVGAgent(Agent):
 
         logger.log("policy_loss", actor_loss, step)
         logger.log("entropy", -first_log_p.mean(), step)
-        self.policy_loss = actor_loss.item()
 
         self.actor_opt.zero_grad()
         actor_loss.backward()
+        clip_grad_norm_(self.actor.parameters(), 1.0)
         self.actor_opt.step()
 
         self.actor.log(logger, step)
         self.temp.update(first_log_p, logger, step)
 
         logger.log("alpha", self.temp.alpha, step)
+
+        return actor_loss.item()
 
     def update_critic(self, xs, xps, us, rs, not_done, logger, step):
         assert xs.ndimension() == 2
@@ -299,16 +303,18 @@ class SACSVGAgent(Agent):
         Q_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(current_Q2, target_Q)
 
         logger.log("value_loss", Q_loss, step)
-        self.critic_loss = Q_loss.item()
+        # self.critic_loss = Q_loss.item()
         current_Q = torch.min(current_Q1, current_Q2)
         logger.log("value_mean", current_Q.mean(), step)
 
         self.critic_opt.zero_grad()
         Q_loss.backward()
         # logger.log("train_critic/Q_loss", Q_loss, step)
+        clip_grad_norm_(self.critic.parameters(), 1.0)
         self.critic_opt.step()
 
         self.critic.log(logger, step)
+        return Q_loss.item()
 
     def update_critic_mve(
         self, first_xs, first_us, first_rs, next_xs, first_not_dones, logger, step
@@ -412,15 +418,19 @@ class SACSVGAgent(Agent):
             and (step % self.model_update_freq == 0)
             and (self.actor_mve or self.critic_target_mve)
         ):
+            dx_losses = []
             for i in range(self.model_update_repeat):
                 obses, actions, rewards = replay_buffer.sample_multistep(
                     self.seq_batch_size, self.seq_train_length
                 )
                 assert obses.ndimension() == 3
                 dx_loss = self.dx.update_step(obses, actions, rewards, logger, step)
-                self.rolling_dx_loss = dx_loss  # not rolling anymore!
+                dx_losses.append(dx_loss)
+            self.rolling_dx_loss = np.mean(dx_losses)  # not rolling anymore!
 
         n_updates = 1 if step < self.warmup_steps else self.model_free_update_repeat
+        actor_losses = []
+        critic_losses = []
         for i in range(n_updates):
             (
                 obs,
@@ -437,12 +447,14 @@ class SACSVGAgent(Agent):
                         obs, action, reward, next_obs, not_done_no_max, logger, step
                     )
                 else:
-                    self.update_critic(
+                    loss = self.update_critic(
                         obs, next_obs, action, reward, not_done_no_max, logger, step
                     )
+                    critic_losses.append(loss)
 
             if step % self.actor_update_freq == 0:
-                self.update_actor_and_alpha(obs, logger, step)
+                loss = self.update_actor_and_alpha(obs, logger, step)
+                actor_losses.append(loss)
 
             if self.rew_opt is not None:
                 self.update_rew_step(obs, action, reward, logger, step)
@@ -454,13 +466,16 @@ class SACSVGAgent(Agent):
                     self.critic, self.critic_target, self.critic_tau
                 )
 
+        self.policy_loss = np.mean(actor_losses)
+        self.critic_loss = np.mean(critic_losses)
+
     def update_rew_step(self, obs, action, reward, logger, step):
         assert obs.dim() == 2
         batch_size, _ = obs.shape
 
         xu = torch.cat((obs, action), dim=1)
         pred_reward = self.rew(xu)
-        assert pred_reward.size() == reward.size()
+        assert pred_reward.size() == reward.size(), (pred_reward.shape, reward.shape)
         reward_loss = F.mse_loss(pred_reward, reward, reduction="mean")
 
         self.rew_opt.zero_grad()

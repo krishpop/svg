@@ -297,7 +297,7 @@ class Workspace(object):
             start_time = time.time()
             for _ in range(self.cfg.steps_num):
                 # sample action for data collection
-                if self.step < self.cfg.num_seed_steps:
+                if self.step < self.cfg.num_seed_steps * self.env.num_envs:
                     action = []
                     for _ in range(self.env.num_envs):
                         action.append(self.env.action_space.sample())
@@ -404,7 +404,7 @@ class Workspace(object):
             self.replay_buffer.load_data(self.replay_dir)
 
 
-@hydra.main(config_path="config", config_name="train")
+@hydra.main(config_path="config", config_name="train", version_base="1.2")
 def main(cfg):
     # this needs to be done for successful pickle
     SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
