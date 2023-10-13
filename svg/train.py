@@ -88,7 +88,7 @@ class Workspace(object):
             agent="sac_svg",
         )
 
-        utils.set_seed_everywhere(cfg.seed)
+        # utils.set_seed_everywhere(cfg.seed)x
         self.device = torch.device(cfg.device)
         # self.env = utils.make_norm_env(cfg)
         self.env = hydra.utils.instantiate(cfg.env)
@@ -128,8 +128,8 @@ class Workspace(object):
     def evaluate(self):
         episode_rewards = []
         for episode in range(self.cfg.num_eval_episodes):
-            if self.cfg.fixed_eval:
-                self.env.set_seed(episode)
+            # if self.cfg.fixed_eval:
+                # self.env.set_seed(episode)
             obs = self.env.reset()
             self.agent.reset()
             self.video_recorder.init(enabled=(episode == 0))
@@ -155,8 +155,8 @@ class Workspace(object):
             self.video_recorder.save(f"{self.step}.mp4")
             self.logger.log("eval/episode_reward", episode_reward, self.step)
             self.logger.log("rewards/step", episode_reward, self.step)
-        if self.cfg.fixed_eval:
-            self.env.set_seed(None)
+        # if self.cfg.fixed_eval:
+            # self.env.set_seed(None)
         self.logger.dump(self.step)
         return np.mean(episode_rewards)
 
@@ -218,8 +218,8 @@ class Workspace(object):
                     self.save(tag=tag)
                     self.steps_since_save = 0
 
-                if self.cfg.num_initial_states is not None:
-                    self.env.set_seed(self.episode % self.cfg.num_initial_states)
+                # if self.cfg.num_initial_states is not None:
+                    # self.env.set_seed(self.episode % self.cfg.num_initial_states)
                 obs = self.env.reset()
                 self.agent.reset()
                 done = False
@@ -297,7 +297,9 @@ class Workspace(object):
             start_time = time.time()
             for _ in range(self.cfg.steps_num):
                 # sample action for data collection
-                if self.step < self.cfg.num_seed_steps * self.env.num_envs:
+                if self.step < self.cfg.num_seed_steps:
+                    # print("seed steps", self.cfg.num_seed_steps)
+                    # print(self.step)
                     action = []
                     for _ in range(self.env.num_envs):
                         action.append(self.env.action_space.sample())
@@ -341,28 +343,29 @@ class Workspace(object):
 
             # update at the end of the rollout
             # TODO need to scale up num updates to account for num_steps
-            # if self.step > self.cfg.num_seed_steps:
-            self.agent.update(self.replay_buffer, self.logger, self.step)
+            if self.step > self.cfg.agent.step_batch_size:
+                self.agent.update(self.replay_buffer, self.logger, self.step)
 
-            end_time = time.time()
-            fps = self.cfg.steps_num * self.env.num_envs / (end_time - start_time)
+                end_time = time.time()
 
-            r = episode_reward_meter.get_mean()
-            l = episode_length_meter.get_mean()
-            print(
-                f"{self.step}/{self.cfg.num_train_steps}, ep_reward: {r:.2f}, ep_len: {l:.2f}, fps: {fps:.2f}, dx_loss: {self.agent.rolling_dx_loss:.2f}, policy_loss: {self.agent.policy_loss:.2f}, critic_loss: {self.agent.critic_loss:.2f}"
-            )
+                fps = self.cfg.steps_num * self.env.num_envs / (end_time - start_time)
 
-            # log metrics for envs that are done
-            self.logger.log("reward", r, self.step)
-            self.logger.log("episode_lengths", l, self.step)
-            self.logger.log("fps", fps, self.step)
-            self.logger.log("dx_loss", self.agent.rolling_dx_loss, self.step)
+                r = episode_reward_meter.get_mean()
+                l = episode_length_meter.get_mean()
+                print(
+                    f"{self.step}/{self.cfg.num_train_steps}, ep_reward: {r:.2f}, ep_len: {l:.2f}, fps: {fps:.2f}, dx_loss: {self.agent.rolling_dx_loss:.2f}, policy_loss: {self.agent.policy_loss:.2f}, critic_loss: {self.agent.critic_loss:.2f}"
+                )
 
-            # save checkpoints
-            if self.step > 0 and epoch % self.cfg.save_freq == 0:
-                tag = str(self.step).zfill(self.cfg.save_zfill)
-                self.save(tag=tag)
+                # log metrics for envs that are done
+                self.logger.log("reward", r, self.step)
+                self.logger.log("episode_lengths", l, self.step)
+                self.logger.log("fps", fps, self.step)
+                self.logger.log("dx_loss", self.agent.rolling_dx_loss, self.step)
+
+                # save checkpoints
+                if self.step > 0 and epoch % self.cfg.save_freq == 0:
+                    tag = str(self.step).zfill(self.cfg.save_zfill)
+                    self.save(tag=tag)
 
         if self.cfg.delete_replay_at_end:
             shutil.rmtree(self.replay_dir)
