@@ -7,7 +7,7 @@ import os
 import csv
 import shutil
 import torch
-import torchvision
+# import torchvision
 import numpy as np
 from termcolor import colored
 
@@ -135,12 +135,12 @@ class Logger(object):
         self._log_frequency = log_frequency
         if save_tb:
             tb_dir = os.path.join(log_dir, "tb")
-            if os.path.exists(tb_dir):
-                try:
-                    shutil.rmtree(tb_dir)
-                except:
-                    print("logger.py warning: Unable to remove tb directory")
-                    pass
+            # if os.path.exists(tb_dir):
+            #     try:
+            #         shutil.rmtree(tb_dir)
+            #     except:
+            #         print("logger.py warning: Unable to remove tb directory")
+            #         pass
             self._sw = SummaryWriter(tb_dir)
         else:
             self._sw = None
@@ -162,11 +162,11 @@ class Logger(object):
         if self._sw is not None:
             self._sw.add_scalar(key, value, step)
 
-    def _try_sw_log_image(self, key, image, step):
-        if self._sw is not None:
-            assert image.dim() == 3
-            grid = torchvision.utils.make_grid(image.unsqueeze(1))
-            self._sw.add_image(key, grid, step)
+    # def _try_sw_log_image(self, key, image, step):
+    #     if self._sw is not None:
+    #         assert image.dim() == 3
+    #         grid = torchvision.utils.make_grid(image.unsqueeze(1))
+    #         self._sw.add_image(key, grid, step)
 
     def _try_sw_log_video(self, key, frames, step):
         if self._sw is not None:

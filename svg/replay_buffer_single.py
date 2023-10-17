@@ -16,7 +16,7 @@ from . import utils
 class ReplayBuffer(object):
     """Buffer to store environment transitions."""
 
-    def __init__(self, num_envs, obs_shape, action_shape, capacity, device, normalize_obs):
+    def __init__(self, obs_shape, action_shape, capacity, device, normalize_obs):
         self.obs_shape = obs_shape
         self.action_shape = action_shape
         self.capacity = capacity

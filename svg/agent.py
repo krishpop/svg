@@ -256,7 +256,7 @@ class SACSVGAgent(Agent):
 
         self.actor_opt.zero_grad()
         actor_loss.backward()
-        clip_grad_norm_(self.actor.parameters(), 1.0)
+        # clip_grad_norm_(self.actor.parameters(), 1.0)
         self.actor_opt.step()
 
         self.actor.log(logger, step)
@@ -310,7 +310,7 @@ class SACSVGAgent(Agent):
         self.critic_opt.zero_grad()
         Q_loss.backward()
         # logger.log("train_critic/Q_loss", Q_loss, step)
-        clip_grad_norm_(self.critic.parameters(), 1.0)
+        # clip_grad_norm_(self.critic.parameters(), 1.0)
         self.critic_opt.step()
 
         self.critic.log(logger, step)

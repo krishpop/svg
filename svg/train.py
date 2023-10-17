@@ -1,45 +1,21 @@
 #!/usr/bin/env python3
 # Copyright (c) Facebook, Inc. and its affiliates.
 
-import numpy as np
-
-# import isaacgym
 import torch
 import copy
 import os
-import sys
 import shutil
 import time
 import pickle as pkl
-from omegaconf import OmegaConf
-import yaml
-
-
-from setproctitle import setproctitle
-
-setproctitle("svg")
 
 import hydra
-
-# import hydra_plugins
 import wandb
-
-from svg import sweeper
 
 from svg.video import VideoRecorder
 from svg import agent, utils, temp, dx, actor, critic
 from svg.logger import Logger
 from svg.replay_buffer import ReplayBuffer
 
-# try:
-#     if os.isatty(sys.stdout.fileno()):
-#         from IPython.core import ultratb
-
-#         sys.excepthook = ultratb.FormattedTB(
-#             mode="Verbose", color_scheme="Linux", call_pdb=1
-#         )
-# except:
-#     pass
 import torch
 import torch.nn as nn
 import numpy as np
@@ -202,21 +178,21 @@ class Workspace(object):
                     eval_rew = self.evaluate()
                     self.steps_since_eval = 0
 
-                    if self.best_eval_rew is None or eval_rew > self.best_eval_rew:
-                        self.save(tag="best")
-                        self.best_eval_rew = eval_rew
+                    # if self.best_eval_rew is None or eval_rew > self.best_eval_rew:
+                    #     self.save(tag="best")
+                    #     self.best_eval_rew = eval_rew
 
-                    self.replay_buffer.save_data(self.replay_dir)
-                    self.save(tag="latest")
+                    # self.replay_buffer.save_data(self.replay_dir)
+                    # self.save(tag="latest")
 
-                if (
-                    self.step > 0
-                    and self.cfg.save_freq
-                    and self.steps_since_save >= self.cfg.save_freq
-                ):
-                    tag = str(self.step).zfill(self.cfg.save_zfill)
-                    self.save(tag=tag)
-                    self.steps_since_save = 0
+                # if (
+                #     self.step > 0
+                #     and self.cfg.save_freq
+                #     and self.steps_since_save >= self.cfg.save_freq
+                # ):
+                #     tag = str(self.step).zfill(self.cfg.save_zfill)
+                #     self.save(tag=tag)
+                #     self.steps_since_save = 0
 
                 # if self.cfg.num_initial_states is not None:
                     # self.env.set_seed(self.episode % self.cfg.num_initial_states)
@@ -363,9 +339,9 @@ class Workspace(object):
                 self.logger.log("dx_loss", self.agent.rolling_dx_loss, self.step)
 
                 # save checkpoints
-                if self.step > 0 and epoch % self.cfg.save_freq == 0:
-                    tag = str(self.step).zfill(self.cfg.save_zfill)
-                    self.save(tag=tag)
+                # if self.step > 0 and epoch % self.cfg.save_freq == 0:
+                #     tag = str(self.step).zfill(self.cfg.save_zfill)
+                #     self.save(tag=tag)
 
         if self.cfg.delete_replay_at_end:
             shutil.rmtree(self.replay_dir)
@@ -406,32 +382,3 @@ class Workspace(object):
         if os.path.exists(self.replay_dir):
             self.replay_buffer.load_data(self.replay_dir)
 
-
-@hydra.main(config_path="config", config_name="train", version_base="1.2")
-def main(cfg):
-    # this needs to be done for successful pickle
-    SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
-    from train import Workspace as W
-
-    fname = os.getcwd() + "/latest.pkl"
-    if os.path.exists(fname):
-        print(f"Resuming fom {fname}")
-        with open(fname, "rb") as f:
-            workspace = pkl.load(f)
-    else:
-        cfg_yaml = OmegaConf.to_yaml(cfg)
-        params = yaml.safe_load(cfg_yaml)
-        wandb.init(
-            project="svg",
-            config=params,
-            entity="krshna",
-            sync_tensorboard=True,
-            resume="allow",
-        )
-        workspace = W(cfg)
-
-    workspace.run()
-
-
-if __name__ == "__main__":
-    main()

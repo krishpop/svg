@@ -712,22 +712,41 @@ class Welford(object):
             return
 
         # x = np.array(x)
-        x = maybe_numpy(x)
-        for n in range(x.shape[0]):
-            self.n += 1.0
-            if not self._init:
-                self._init = True
-                self._K = x[n]
-                self._min = x[n]
-                self._max = x[n]
-                self.shape = x.shape
-            else:
-                self._min = np.minimum(self._min, x[n])
-                self._max = np.maximum(self._max, x[n])
 
-            self._Ex += (x[n] - self._K) / self.n
-            self._Ex2 += (x[n] - self._K) * (x[n] - self._Ex)
-            self._K = self._Ex
+        # single env
+        x = maybe_numpy(x)
+        self.n += 1.0
+        if not self._init:
+            self._init = True
+            self._K = x
+            self._min = x
+            self._max = x
+            self.shape = x.shape
+        else:
+            self._min = np.minimum(self._min, x)
+            self._max = np.maximum(self._max, x)
+
+        self._Ex += (x - self._K) / self.n
+        self._Ex2 += (x - self._K) * (x - self._Ex)
+        self._K = self._Ex
+
+        # multi version
+        # x = maybe_numpy(x)
+        # for n in range(x.shape[0]):
+        #     self.n += 1.0
+        #     if not self._init:
+        #         self._init = True
+        #         self._K = x[n]
+        #         self._min = x[n]
+        #         self._max = x[n]
+        #         self.shape = x.shape
+        #     else:
+        #         self._min = np.minimum(self._min, x[n])
+        #         self._max = np.maximum(self._max, x[n])
+
+        #     self._Ex += (x[n] - self._K) / self.n
+        #     self._Ex2 += (x[n] - self._K) * (x[n] - self._Ex)
+        #     self._K = self._Ex
 
     def __call__(self, x):
         self.add_data(x)

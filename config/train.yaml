@@ -1,7 +1,7 @@
 defaults:
   - env: mbpo_ant
   # - override hydra/sweeper: svg
-  - override hydra/launcher: submitit_slurm
+  # - override hydra/launcher: submitit_slurm
 
 experiment: test
 
@@ -143,16 +143,15 @@ learn_temp:
   only_decrease_alpha: false
   lr: 1e-4
   device: ${device}
-
-hydra:
-  run:
-    dir: ./exp/local/${now:%Y.%m.%d}/${now:%H%M}_${experiment}
-  sweep:
-    dir: ./exp/${now:%Y.%m.%d}/${now:%H%M}_${experiment}
-    subdir: ${hydra.job.num}
-  launcher:
-    max_num_timeout: 100000
-    timeout_min: 4319
-    partition: scavenge
-    mem_gb: 64
-    gpus_per_node: 1
+# hydra:
+#   run:
+#     dir: ./exp/local/${now:%Y.%m.%d}/${now:%H%M}_${experiment}
+#   sweep:
+#     dir: ./exp/${now:%Y.%m.%d}/${now:%H%M}_${experiment}
+#     subdir: ${hydra.job.num}
+#   launcher:
+#     max_num_timeout: 100000
+#     timeout_min: 4319
+#     partition: scavenge
+#     mem_gb: 64
+#     gpus_per_node: 1
